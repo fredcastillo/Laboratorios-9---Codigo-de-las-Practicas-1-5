@@ -1,0 +1,399 @@
+#Comandos usados practica 1
+
+# WEBMIN
+
+# Agregar el repositorio de webmin
+
+Crear un archivo con:
+sudo nano /etc/yum.repos.d/webmin.repo
+
+[Webmin]
+name=Webmin Distribution Neutral
+#baseurl=https://download.webmin.com/download/yum
+mirrorlist=https://download.webmin.com/download/yum/mirrorlist
+enabled=1
+gpgcheck=1
+gpgkey=https://download.webmin.com/jcameron-key.asc
+
+# Instalar dependencias y webmin
+
+sudo dnf makecache
+sudo dnf install webmin --nogpgcheck -y
+
+# Habilitar el servicio
+
+sudo systemctl enable --now webmin
+
+# Configurar firewall
+
+sudo firewall-cmd --permanent --add-port=10000/tcp
+sudo firewall-cmd --reload
+
+# Entrar con https://192.168.100.168:10000
+
+# PRÁCTICAS:
+
+Administración de usuarios: Crear, y eliminar una cuenta de usuario: System -> Users and Groups.
+Gestión de servicios: Iniciar, detener y reiniciar servicio del sistema (Ej SSH): System -> Bootup and Shutdown
+Configuración de red: Configurar una IP estatica en interfaces de red: Networking -> Network Configuration.
+Administración de software: Instalar Alguna herramienta: System -> Software Packages.
+Gestión de archivos y directorios: Explorar, editar un archivo y eliminarlo: Tools -> File Manager
+Monitorización del sistema: Supervisar el rendimiento del sistema,(Memoria, Procesador Armacenamiento): Dashboard
+
+============================================
+
+
+
+
+###############################################
+# PRACTICA 2 — Terraform en CentOS Stream 10
+###############################################
+
+167.99.236.169
+
+# ==========================================================
+# 1. CREAR TOKEN DE DIGITALOCEAN (manual)
+# ==========================================================
+# Ir a: https://cloud.digitalocean.com/account/api/tokens
+# Crear un token → otorgar permisos WRITE AND READ→ guardar el token.
+
+# ==========================================================
+# 2. INSTALAR DEPENDENCIAS
+# ==========================================================
+sudo dnf install -y yum-utils shadow-utils
+
+# ==========================================================
+# 3. AGREGAR EL REPOSITORIO OFICIAL DE HASHICORP
+# ==========================================================
+sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo
+
+# ==========================================================
+# 4. AJUSTAR EL REPO PARA QUE SEA COMPATIBLE CON CENTOS STREAM 10
+# (Este ajuste es necesario para que el paquete pueda instalarse)
+# ==========================================================
+sudo sed -i 's/$releasever/10/g' /etc/yum.repos.d/hashicorp.repo
+
+# ==========================================================
+# 5. INSTALAR TERRAFORM
+# ==========================================================
+sudo dnf install -y terraform
+
+# Verificar
+terraform  --version
+
+
+# ==========================================================
+# 6. CREAR LLAVE SSH PARA DIGITALOCEAN
+# ==========================================================
+ssh-keygen -t rsa -b 4096 -C "terraform_do_key"
+
+# La llave queda en:
+# ~/.ssh/id_rsa
+# ~/.ssh/id_rsa.pub
+
+
+# ==========================================================
+# 7. CREAR CARPETA DEL PROYECTO
+# ==========================================================
+mkdir -p ~/do_terraform
+cd ~/do_terraform
+
+# ==========================================================
+# 8. EXPORTAR EL TOKEN DE DIGITALOCEAN
+# ==========================================================
+export DIGITALOCEAN_TOKEN="TOKENAQUI"
+
+# (Opcional, hacerlo permanente)
+echo 'export DIGITALOCEAN_TOKEN="TU_TOKEN_AQUI"' >> ~/.bashrc
+
+
+# ==========================================================
+# 9. CREAR ARCHIVO main.tf
+# ==========================================================
+cat << 'EOF' > main.tf
+terraform {
+  required_providers {
+    digitalocean = {
+      source  = "digitalocean/digitalocean"
+      version = "~> 1.14"
+    }
+  }
+}
+
+provider "digitalocean" {
+}
+
+resource "digitalocean_ssh_key" "mi_llave" {
+  name       = "Llave-CentOS-Stream10"
+  public_key = file("~/.ssh/id_rsa.pub")
+}
+
+resource "digitalocean_droplet" "os3_vm" {
+  image    = "ubuntu-22-04-x64"
+  name     = "OS3vm"
+  region   = "nyc1"
+  size     = "s-1vcpu-1gb"
+  ssh_keys = [digitalocean_ssh_key.mi_llave.fingerprint]
+}
+
+output "ip_address" {
+  value = digitalocean_droplet.os3_vm.ipv4_address
+}
+EOF
+
+
+# ==========================================================
+# 10. INICIALIZAR TERRAFORM
+# ==========================================================
+terraform init
+
+# ==========================================================
+# 11. PLANIFICAR CAMBIOS
+# ==========================================================
+terraform plan
+
+# ==========================================================
+# 12. APLICAR CAMBIOS Y CREAR LA VM
+# ==========================================================
+terraform apply -auto-approve
+
+
+# ==========================================================
+# 13. VALIDACIÓN
+# ==========================================================
+# Mostrar la IP generada:
+terraform output ip_address
+
+# Conectarse por SSH (reemplazar <IP>)
+ssh root@<IP>
+
+# Validar también desde el panel web:
+# https://cloud.digitalocean.com/droplets
+
+
+# ==========================================================
+# 14. DESTRUIR LA INFRAESTRUCTURA (MUY IMPORTANTE)
+# ==========================================================
+terraform destroy -auto-approve
+
+
+# ==========================================================
+# SOLUCIONES A PROBLEMAS COMUNES
+# ==========================================================
+# Terraform no inicia
+terraform init -upgrade
+
+# Permiso denegado con SSH
+chmod 600 ~/.ssh/id_rsa
+ssh-add ~/.ssh/id_rsa
+sudo systemctl restart sshd
+
+# Error de token
+export DIGITALOCEAN_TOKEN="TOKEN_CORRECTO"
+terraform apply
+
+# Repo de HashiCorp no funciona
+sudo rm -f /etc/yum.repos.d/hashicorp.repo
+sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo
+sudo sed -i 's/$releasever/10/g' /etc/yum.repos.d/hashicorp.repo
+sudo dnf clean metadata
+
+# Rehacer la llave SSH si falla
+ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
+
+
+
+
+
+
+###############################################
+# PRACTICA 3 – ANSIBLE + LINUX + WINDOWS (CentOS Stream 10)
+###############################################
+
+## PRIMERA PARTE – CONTROLADOR ANSIBLE ##
+sudo dnf install python3-pip -y
+pip3 install ansible pywinrm
+
+# Crea un usuario ansible
+sudo useradd ansible
+sudo passwd ansible
+su - ansible
+ssh-keygen -t rsa
+
+## SEGUNDA PARTE – VM DE DIGITALOCEAN ##
+ssh root@IP_TERRAFORM
+adduser ansible
+echo "ansible ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ansible
+
+# Copiar llave SSH del usuario normal de CentOS Stream 10
+ssh-keygen -t rsa
+cat ~/.ssh/id_rsa.pub
+
+su - ansible
+mkdir ~/.ssh
+chmod 700 ~/.ssh
+nano ~/.ssh/authorized_keys
+# Pegar la llave copiada
+chmod 600 ~/.ssh/authorized_keys
+
+# Copiar llave SSH del usuario ansible
+su - ansible
+ssh-keygen -t rsa
+cat ~/.ssh/id_rsa.pub
+su - ansible
+nano ~/.ssh/authorized_keys
+# Pegar la otra llave también
+su - ansible
+ssh ansible@167.99.236.169
+
+
+ssh ansible@ip_digi_terraform
+
+## TERCERA PARTE ##
+
+# En windows 
+
+Crear un usuario local llamado ansible y agregarlo al grupo de administradores
+
+# Habilitar la administracion remota
+
+Abrir powershell como adminstrador:
+
+###############################################################
+# FIX DEFINITIVO PARA ACTIVAR WINRM HTTPS (5986)
+###############################################################
+
+Write-Host "🔧 Iniciando reparación automática de WinRM..." -ForegroundColor Cyan
+
+# 1. TLS12
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# 2. Iniciar WinRM
+winrm quickconfig -quiet
+Set-Service WinRM -StartupType Automatic
+Start-Service WinRM
+
+# 3. Eliminar listeners previos
+Write-Host "🔹 Eliminando listeners existentes..."
+try { winrm delete winrm/config/listener?Address=*+Transport=HTTPS } catch {}
+try { winrm delete winrm/config/listener?Address=*+Transport=HTTP } catch {}
+
+# 4. Crear listener HTTP normal
+Write-Host "🔹 Creando listener HTTP 5985..."
+winrm create winrm/config/listener?Address=*+Transport=HTTP
+
+# 5. Crear certificado
+Write-Host "🔹 Creando certificado..."
+$cert = New-SelfSignedCertificate -DnsName "192.168.100.53" -CertStoreLocation "cert:\LocalMachine\My"
+
+# 6. Crear listener HTTPS
+Write-Host "🔹 Creando listener HTTPS 5986..."
+$thumb = $cert.Thumbprint
+winrm create winrm/config/listener?Address=*+Transport=HTTPS "@{Hostname=`"192.168.100.53`";CertificateThumbprint=`"$thumb`"}"
+
+# 7. Abrir firewall
+Write-Host "🔹 Abriendo puerto 5986..."
+netsh advfirewall firewall add rule name="WinRM HTTPS" protocol=TCP dir=in localport=5986 action=allow > $null
+
+# 8. Mostrar estado
+Write-Host "`n================= RESULTADO ================="
+winrm enumerate winrm/config/listener
+Write-Host "=============================================`n"
+
+Write-Host "🎉 LISTO. Prueba desde Linux:"
+Write-Host "nc -vz 192.168.100.53 5986"
+Write-Host "ansible win -m win_ping"
+###############################################################
+
+## CUARTA PARTE ##
+
+# En CENTOS STREAM 10 usuario normal
+
+Para crear el inventario, creamos el directorio y el archivo
+
+sudo mkdir -p /etc/ansible
+sudo nano /etc/ansible/hosts
+
+[linux]
+167.99.236.169 ansible_user=ansible
+
+[win]
+192.168.100.53 ansible_user=ansible ansible_password=1234 ansible_connection=winrm ansible_winrm_server_cert_validation=ignore
+
+# Hacer ping
+
+ansible linux -m ping
+ansible win -m win_ping
+
+---------------------------------
+
+PRACTICA 4
+
+ansible win -m win_copy -a "src='C:/Users/ansible/Desktop/prueba.txt' dest='C:/Users/ansible/Documents/' remote_src=yes"
+
+ansible linux -m reboot -b
+
+----------------------------------
+
+
+Comandos usados practica 5
+
+# Playbook de windows (notepad++)
+
+nano instalar_notepad.yml
+
+---
+- name: Instalacion de aplicaciones en Windows
+  hosts: win
+  tasks:
+    - name: Instalar Chocolatey
+      win_chocolatey:
+        name: chocolatey
+        state: present
+
+    - name: Instalar Notepad++
+      win_chocolatey:
+        name: notepadplusplus
+        state: present
+        
+# Playbook para Linux (NGINX)
+
+nano instalar_nginx.yml
+
+---
+- name: Configurar Servidor Web NGINX
+  hosts: linux
+  become: yes
+  tasks:
+    - name: Actualizar repositorios e instalar NGINX
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+
+    - name: Iniciar el servicio y habilitarlo al arranque
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+
+O
+
+
+
+        
+# Ejecutar el de windows
+
+ansible-playbook instalar_notepad.yml
+
+# Ejecutar el de linux
+
+ansible-playbook instalar_nginx.yml
+
+167.99.236.169
+
+============================================
+
+Laboratorio 9.1 I INSTALACION DE WEBMIN EN CENTOS STREAM 10 || DICIEMBRE 2025
+Laboratorio 9.4 I USANDO COMANDOS AD-HOC EN CENTOS STREAM 10 || DICIEMBRE 2025
+Laboratorio 9.5 I CREACION DE PLAYBOOKS EN CENTOS STREAM 10 || DICIEMBRE 2025
